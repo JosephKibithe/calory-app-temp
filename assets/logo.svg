@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="200px" height="200px" viewBox="0 0 200 200" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <title>Calory App Logo</title>
+    <g id="Logo" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <circle id="Background" fill="#4CAF50" cx="100" cy="100" r="100"></circle>
+        <g id="Icon" transform="translate(40.000000, 40.000000)" fill="#FFFFFF">
+            <path d="M60,0 C93.137085,0 120,26.862915 120,60 C120,93.137085 93.137085,120 60,120 C26.862915,120 0,93.137085 0,60 C0,26.862915 26.862915,0 60,0 Z M60,20 C37.90861,20 20,37.90861 20,60 C20,82.09139 37.90861,100 60,100 C82.09139,100 100,82.09139 100,60 C100,37.90861 82.09139,20 60,20 Z" id="Circle" fill-rule="nonzero"></path>
+            <rect id="Line-1" x="55" y="35" width="10" height="50" rx="5"></rect>
+            <rect id="Line-2" x="35" y="55" width="50" height="10" rx="5"></rect>
+        </g>
+    </g>
+</svg>

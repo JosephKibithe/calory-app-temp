@@ -1,27 +1,46 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Switch, ScrollView, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Switch, ScrollView, Alert, ActivityIndicator, TextInput } from 'react-native';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../contexts/AuthContext';
+import { useUser } from '../contexts/UserContext';
 
-// Mock user data
-const userData = {
-  name: 'Alex Johnson',
-  email: 'alex.johnson@example.com',
-  subscription: 'Premium',
-  subscriptionRenews: 'May 8, 2025',
-  calorieTarget: 2000,
-  dietPreference: 'No Restrictions',
+// Default subscription data
+const subscriptionData = {
+  type: 'Free',
+  renews: 'N/A',
+  isActive: true,
 };
 
 export default function Settings() {
   const [notifications, setNotifications] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
   const [offlineMode, setOfflineMode] = useState(false);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [fullName, setFullName] = useState('');
+  const [age, setAge] = useState('');
+  const [height, setHeight] = useState('');
+  const [weight, setWeight] = useState('');
+  const [calorieTarget, setCalorieTarget] = useState('');
+  const [dietPreference, setDietPreference] = useState('No Restrictions');
+  const [isSaving, setIsSaving] = useState(false);
+  
+  const { signOut } = useAuth();
+  const { userProfile, loading, updateProfile } = useUser();
 
-  const handleLogout = () => {
-    // In a real app, we would clear the Supabase session
+  useEffect(() => {
+    if (userProfile) {
+      setFullName(userProfile.full_name || '');
+      setAge(userProfile.age ? userProfile.age.toString() : '');
+      setHeight(userProfile.height ? userProfile.height.toString() : '');
+      setWeight(userProfile.weight ? userProfile.weight.toString() : '');
+      setCalorieTarget(userProfile.calorie_target ? userProfile.calorie_target.toString() : '2000');
+    }
+  }, [userProfile]);
+
+  const handleLogout = async () => {
     Alert.alert(
       'Confirm Logout',
       'Are you sure you want to log out?',
@@ -32,11 +51,34 @@ export default function Settings() {
         },
         {
           text: 'Logout',
-          onPress: () => router.replace('/'),
+          onPress: async () => {
+            await signOut();
+            router.replace('/login');
+          },
           style: 'destructive',
         },
       ]
     );
+  };
+  
+  const handleSaveProfile = async () => {
+    setIsSaving(true);
+    try {
+      await updateProfile({
+        full_name: fullName,
+        age: age ? parseInt(age) : undefined,
+        height: height ? parseFloat(height) : undefined,
+        weight: weight ? parseFloat(weight) : undefined,
+        calorie_target: calorieTarget ? parseInt(calorieTarget) : 2000,
+      });
+      setIsEditingProfile(false);
+      Alert.alert('Success', 'Profile updated successfully');
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      Alert.alert('Error', 'Failed to update profile');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const renderSettingItem = (icon: any, title: string, value: string | null, onPress?: () => void) => (
@@ -76,50 +118,147 @@ export default function Settings() {
       </View>
 
       <ScrollView style={styles.content}>
-        {/* Profile Section */}
-        <View style={styles.section}>
-          <View style={styles.profileHeader}>
-            <View style={styles.profileAvatar}>
-              <Text style={styles.profileInitials}>{userData.name.charAt(0)}</Text>
-            </View>
-            <View style={styles.profileInfo}>
-              <Text style={styles.profileName}>{userData.name}</Text>
-              <Text style={styles.profileEmail}>{userData.email}</Text>
-            </View>
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#4CAF50" />
+            <Text style={styles.loadingText}>Loading profile...</Text>
           </View>
-          <TouchableOpacity style={styles.editProfileButton}>
-            <Text style={styles.editProfileButtonText}>Edit Profile</Text>
-          </TouchableOpacity>
-        </View>
+        ) : (
+          <>
+            {/* Profile Section */}
+            <View style={styles.section}>
+              {isEditingProfile ? (
+                <View style={styles.editProfileForm}>
+                  <Text style={styles.sectionTitle}>Edit Profile</Text>
+                  <View style={styles.formGroup}>
+                    <Text style={styles.formLabel}>Full Name</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      value={fullName}
+                      onChangeText={setFullName}
+                      placeholder="Enter your full name"
+                    />
+                  </View>
+                  <View style={styles.formGroup}>
+                    <Text style={styles.formLabel}>Age</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      value={age}
+                      onChangeText={setAge}
+                      placeholder="Enter your age"
+                      keyboardType="number-pad"
+                    />
+                  </View>
+                  <View style={styles.formGroup}>
+                    <Text style={styles.formLabel}>Height (cm)</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      value={height}
+                      onChangeText={setHeight}
+                      placeholder="Enter your height"
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  <View style={styles.formGroup}>
+                    <Text style={styles.formLabel}>Weight (kg)</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      value={weight}
+                      onChangeText={setWeight}
+                      placeholder="Enter your weight"
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  <View style={styles.formGroup}>
+                    <Text style={styles.formLabel}>Daily Calorie Target</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      value={calorieTarget}
+                      onChangeText={setCalorieTarget}
+                      placeholder="Enter your daily calorie target"
+                      keyboardType="number-pad"
+                    />
+                  </View>
+                  <View style={styles.formActions}>
+                    <TouchableOpacity 
+                      style={[styles.formButton, styles.cancelButton]}
+                      onPress={() => setIsEditingProfile(false)}
+                      disabled={isSaving}
+                    >
+                      <Text style={styles.cancelButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[styles.formButton, styles.saveButton]}
+                      onPress={handleSaveProfile}
+                      disabled={isSaving}
+                    >
+                      {isSaving ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={styles.saveButtonText}>Save</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <>
+                  <View style={styles.profileHeader}>
+                    <View style={styles.profileAvatar}>
+                      <Text style={styles.profileInitials}>{(userProfile?.full_name || 'U').charAt(0)}</Text>
+                    </View>
+                    <View style={styles.profileInfo}>
+                      <Text style={styles.profileName}>{userProfile?.full_name || 'User'}</Text>
+                      <Text style={styles.profileEmail}>{userProfile?.email || ''}</Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity 
+                    style={styles.editProfileButton}
+                    onPress={() => setIsEditingProfile(true)}
+                  >
+                    <Text style={styles.editProfileButtonText}>Edit Profile</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </>
+        )}
 
-        {/* Subscription Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Subscription</Text>
-          <View style={styles.subscriptionCard}>
-            <View style={styles.subscriptionHeader}>
-              <Text style={styles.subscriptionType}>{userData.subscription}</Text>
-              <View style={styles.subscriptionBadge}>
-                <Text style={styles.subscriptionBadgeText}>Active</Text>
+        {!loading && (
+          <>
+            {/* Subscription Section */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Subscription</Text>
+              <View style={styles.subscriptionCard}>
+                <View style={styles.subscriptionHeader}>
+                  <Text style={styles.subscriptionType}>{subscriptionData.type}</Text>
+                  <View style={styles.subscriptionBadge}>
+                    <Text style={styles.subscriptionBadgeText}>Active</Text>
+                  </View>
+                </View>
+                <Text style={styles.subscriptionRenewal}>
+                  {subscriptionData.type === 'Free' ? 'Free plan' : `Renews on ${subscriptionData.renews}`}
+                </Text>
+                <TouchableOpacity style={styles.subscriptionButton}>
+                  <Text style={styles.subscriptionButtonText}>Upgrade to Premium</Text>
+                </TouchableOpacity>
               </View>
             </View>
-            <Text style={styles.subscriptionRenewal}>
-              Renews on {userData.subscriptionRenews}
-            </Text>
-            <TouchableOpacity style={styles.subscriptionButton}>
-              <Text style={styles.subscriptionButtonText}>Manage Subscription</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+          </>
+        )}
 
-        {/* Preferences Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Preferences</Text>
-          {renderSettingItem('nutrition-outline', 'Daily Calorie Target', userData.calorieTarget.toString(), () => router.push('/edit-goals'))}
-          {renderSettingItem('restaurant-outline', 'Diet Preference', userData.dietPreference, () => router.push('/edit-goals'))}
-          {renderToggleItem('notifications-outline', 'Notifications', notifications, setNotifications)}
-          {renderToggleItem('moon-outline', 'Dark Mode', darkMode, setDarkMode)}
-          {renderToggleItem('cloud-offline-outline', 'Offline Mode', offlineMode, setOfflineMode)}
-        </View>
+        {!loading && (
+          <>
+            {/* Preferences Section */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Preferences</Text>
+              {renderSettingItem('nutrition-outline', 'Daily Calorie Target', userProfile?.calorie_target?.toString() || '2000', () => setIsEditingProfile(true))}
+              {renderSettingItem('restaurant-outline', 'Diet Preference', dietPreference, () => console.log('Diet preference pressed'))}
+              {renderToggleItem('notifications-outline', 'Notifications', notifications, setNotifications)}
+              {renderToggleItem('moon-outline', 'Dark Mode', darkMode, setDarkMode)}
+              {renderToggleItem('cloud-offline-outline', 'Offline Mode', offlineMode, setOfflineMode)}
+            </View>
+          </>
+        )}
 
         {/* App Section */}
         <View style={styles.section}>
@@ -165,6 +304,71 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
     paddingBottom: 60, // Add padding to account for the bottom navigation bar
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#757575',
+  },
+  editProfileForm: {
+    padding: 16,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+  },
+  formGroup: {
+    marginBottom: 16,
+  },
+  formLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#757575',
+    marginBottom: 8,
+  },
+  formInput: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    backgroundColor: '#f5f5f5',
+  },
+  formActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 24,
+  },
+  formButton: {
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    minWidth: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelButton: {
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  cancelButtonText: {
+    color: '#757575',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  saveButton: {
+    backgroundColor: '#4CAF50',
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   bottomNav: {
     flexDirection: 'row',

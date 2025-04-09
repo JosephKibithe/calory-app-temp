@@ -1,18 +1,32 @@
 import React, { useEffect } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { Platform } from 'react-native';
+import { AuthProvider, useAuth } from '../contexts/AuthContext';
+import { UserProvider } from '../contexts/UserContext';
 
 // Keep the splash screen visible while we initialize the app
 SplashScreen.preventAutoHideAsync();
 
-export default function RootLayout() {
+function RootLayoutNav() {
+  const { user, loading } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+
   useEffect(() => {
-    // Hide the splash screen after the app is ready
-    SplashScreen.hideAsync();
-  }, []);
+    if (loading) return;
+
+    // Check if the user is authenticated
+    if (!user && segments[0] !== 'login' && segments[0] !== 'register' && segments[0] !== 'forgot-password' && segments[0] !== '') {
+      // If the user is not signed in and not on an auth screen, redirect to login
+      router.replace('/login');
+    } else if (user && (segments[0] === 'login' || segments[0] === 'register' || segments[0] === 'forgot-password' || segments[0] === '')) {
+      // If the user is signed in and on an auth screen, redirect to dashboard
+      router.replace('/dashboard');
+    }
+  }, [user, segments, loading]);
 
   return (
     <SafeAreaProvider>
@@ -83,7 +97,46 @@ export default function RootLayout() {
             animationDuration: 150,
           }}
         />
+        <Stack.Screen
+          name="login"
+          options={{
+            headerShown: false,
+            animation: 'fade',
+            gestureEnabled: false,
+          }}
+        />
+        <Stack.Screen
+          name="register"
+          options={{
+            headerShown: false,
+            animation: 'slide_from_right',
+            animationDuration: 200,
+          }}
+        />
+        <Stack.Screen
+          name="forgot-password"
+          options={{
+            headerShown: false,
+            animation: 'slide_from_right',
+            animationDuration: 200,
+          }}
+        />
       </Stack>
     </SafeAreaProvider>
+  );
+}
+
+export default function RootLayout() {
+  useEffect(() => {
+    // Hide the splash screen after the app is ready
+    SplashScreen.hideAsync();
+  }, []);
+
+  return (
+    <AuthProvider>
+      <UserProvider>
+        <RootLayoutNav />
+      </UserProvider>
+    </AuthProvider>
   );
 }
