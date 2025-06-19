@@ -1,21 +1,35 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Alert, Platform } from 'react-native';
-import { router } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import React, { useState, useRef, useEffect } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  ActivityIndicator,
+  Alert,
+  Platform,
+} from "react-native";
+import { router } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
+import { analyzeImage } from "../lib/vision";
 
 export default function CaptureScreen() {
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [foodLabels, setFoodLabels] = useState<string[]>([]);
 
   useEffect(() => {
     // Request camera permissions when component mounts
     (async () => {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Camera permission is required to use this feature');
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission needed",
+          "Camera permission is required to use this feature"
+        );
       }
     })();
   }, []);
@@ -32,10 +46,11 @@ export default function CaptureScreen() {
 
       if (!result.canceled) {
         setCapturedImage(result.assets[0].uri);
+        console.log("[CAPTURE] Image captured:", result.assets[0].uri);
       }
     } catch (error) {
-      console.error('Error taking picture:', error);
-      Alert.alert('Error', 'Failed to take picture. Please try again.');
+      console.error("Error taking picture:", error);
+      Alert.alert("Error", "Failed to take picture. Please try again.");
     }
   };
 
@@ -50,28 +65,130 @@ export default function CaptureScreen() {
 
       if (!result.canceled) {
         setCapturedImage(result.assets[0].uri);
+        console.log("[CAPTURE] Image selected:", result.assets[0].uri);
       }
     } catch (error) {
-      console.error('Error picking image:', error);
-      Alert.alert('Error', 'Failed to pick image. Please try again.');
+      console.error("Error picking image:", error);
+      Alert.alert("Error", "Failed to pick image. Please try again.");
     }
   };
 
-  const analyzeImage = async () => {
+  const analyzeImageHandler = async () => {
     if (!capturedImage) return;
-    
+
     setAnalyzing(true);
-    
-    // In a real app, we would send the image to the Deepseek API for analysis
-    // For now, we'll simulate a delay and then navigate to the results screen
-    setTimeout(() => {
+    setFoodLabels([]); // Clear previous labels
+    console.log("[CAPTURE] Starting image analysis for:", capturedImage);
+
+    try {
+      const labels = await analyzeImage(capturedImage);
+      console.log("[CAPTURE] Raw analysis result:", labels);
+
+      // Ensure labels is an array
+      const validLabels = Array.isArray(labels) ? labels : [];
+      setFoodLabels(validLabels);
+
+      if (!validLabels || validLabels.length === 0) {
+        console.log("[CAPTURE] No food labels detected");
+        // Provide default labels for testing/fallback
+        const defaultLabels = ["Chicken", "Rice", "Broccoli"];
+        console.log(
+          "[CAPTURE] Using default labels for testing:",
+          defaultLabels
+        );
+
+        Alert.alert(
+          "Detection Issue",
+          "We had trouble identifying food in this image. Would you like to use sample food items or try again?",
+          [
+            {
+              text: "Try Again",
+              style: "cancel",
+              onPress: () => resetCapture(),
+            },
+            {
+              text: "Use Sample Items",
+              onPress: () => {
+                // Navigate with default labels
+                console.log("[CAPTURE] Navigating with default labels");
+                router.push({
+                  pathname: "/analysis-results",
+                  params: { labels: JSON.stringify(defaultLabels) },
+                });
+              },
+            },
+          ]
+        );
+      } else {
+        console.log("[CAPTURE] Food labels detected:", validLabels);
+        // Successfully detected food, show a success message and option to continue
+        setTimeout(() => {
+          Alert.alert(
+            "Food Detected!",
+            `We detected ${validLabels.length} food items. Would you like to continue to calculate nutritional information?`,
+            [
+              {
+                text: "Cancel",
+                style: "cancel",
+              },
+              {
+                text: "Continue",
+                onPress: () => {
+                  // Navigate to results screen with the detected labels
+                  const serializedLabels = JSON.stringify(validLabels);
+                  console.log(
+                    "[CAPTURE] Navigating to results with serialized labels:",
+                    serializedLabels
+                  );
+
+                  router.push({
+                    pathname: "/analysis-results",
+                    params: { labels: serializedLabels },
+                  });
+                },
+              },
+            ]
+          );
+        }, 500);
+      }
+    } catch (error) {
+      console.error("[CAPTURE] Error analyzing image:", error);
+
+      // Fallback to sample data for testing
+      const sampleLabels = ["Chicken", "Rice", "Broccoli"];
+
+      Alert.alert(
+        "Analysis Error",
+        "We encountered an error analyzing your image. Would you like to use sample food items or try again?",
+        [
+          {
+            text: "Try Again",
+            style: "cancel",
+            onPress: () => resetCapture(),
+          },
+          {
+            text: "Use Sample Items",
+            onPress: () => {
+              console.log(
+                "[CAPTURE] Using sample items after error:",
+                sampleLabels
+              );
+              router.push({
+                pathname: "/analysis-results",
+                params: { labels: JSON.stringify(sampleLabels) },
+              });
+            },
+          },
+        ]
+      );
+    } finally {
       setAnalyzing(false);
-      router.push('/analysis-results');
-    }, 2000);
+    }
   };
 
   const resetCapture = () => {
     setCapturedImage(null);
+    setFoodLabels([]);
   };
 
   // Loading state removed as we're using ImagePicker which handles permissions
@@ -81,10 +198,10 @@ export default function CaptureScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
-      
+
       <View style={styles.header}>
-        <TouchableOpacity 
-          onPress={() => router.push('/dashboard')} 
+        <TouchableOpacity
+          onPress={() => router.push("/dashboard")}
           style={styles.backButton}
           activeOpacity={0.7}
         >
@@ -104,9 +221,17 @@ export default function CaptureScreen() {
                 <View style={styles.focusFrame} />
               </View>
               <View style={styles.cameraInstructions}>
-                <Ionicons name="camera-outline" size={48} color="rgba(255,255,255,0.7)" />
-                <Text style={styles.cameraInstructionsText}>Camera Preview</Text>
-                <Text style={styles.cameraInstructionsSubtext}>Tap the button below to capture</Text>
+                <Ionicons
+                  name="camera-outline"
+                  size={48}
+                  color="rgba(255,255,255,0.7)"
+                />
+                <Text style={styles.cameraInstructionsText}>
+                  Camera Preview
+                </Text>
+                <Text style={styles.cameraInstructionsSubtext}>
+                  Tap the button below to capture
+                </Text>
               </View>
             </View>
           </View>
@@ -115,17 +240,14 @@ export default function CaptureScreen() {
 
       {capturedImage ? (
         <View style={styles.captureActions}>
-          <TouchableOpacity 
-            style={styles.actionButton} 
-            onPress={resetCapture}
-          >
+          <TouchableOpacity style={styles.actionButton} onPress={resetCapture}>
             <Ionicons name="refresh-outline" size={24} color="#fff" />
             <Text style={styles.actionButtonText}>Retake</Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.actionButton, styles.analyzeButton]} 
-            onPress={analyzeImage}
+
+          <TouchableOpacity
+            style={[styles.actionButton, styles.analyzeButton]}
+            onPress={analyzeImageHandler}
             disabled={analyzing}
           >
             {analyzing ? (
@@ -146,63 +268,74 @@ export default function CaptureScreen() {
           <TouchableOpacity style={styles.galleryButton} onPress={pickImage}>
             <Ionicons name="images-outline" size={28} color="#fff" />
           </TouchableOpacity>
-          
+
           <TouchableOpacity style={styles.captureButton} onPress={takePicture}>
             <View style={styles.captureButtonInner} />
           </TouchableOpacity>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.flipButton}
             onPress={() => {
-              Alert.alert('Camera', 'Camera flip would be available in the actual implementation');
+              Alert.alert(
+                "Camera",
+                "Camera flip would be available in the actual implementation"
+              );
             }}
           >
             <Ionicons name="camera-reverse-outline" size={28} color="#fff" />
           </TouchableOpacity>
         </View>
       )}
-      
+
       <View style={styles.instructions}>
         <Text style={styles.instructionsText}>
-          {capturedImage 
+          {capturedImage
             ? 'Tap "Analyze Food" to identify items and calculate calories'
-            : 'Position your meal in the frame and tap the button to capture'}
+            : "Position your meal in the frame and tap the button to capture"}
         </Text>
       </View>
 
+      {foodLabels.length > 0 && (
+        <View style={styles.foodLabelsContainer}>
+          <Text style={styles.foodLabelsTitle}>Detected Food Items:</Text>
+          {foodLabels.map((label, index) => (
+            <Text key={index} style={styles.foodLabel}>
+              {label}
+            </Text>
+          ))}
+        </View>
+      )}
+
       {/* Bottom Navigation */}
       <View style={styles.bottomNav}>
-        <TouchableOpacity 
-          style={styles.navItem} 
+        <TouchableOpacity
+          style={styles.navItem}
           onPress={() => {
-            router.replace('/dashboard');
+            router.replace("/dashboard");
           }}
           activeOpacity={0.7}
         >
           <Ionicons name="home-outline" size={24} color="#757575" />
           <Text style={styles.navText}>Home</Text>
         </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.navItem}
-          activeOpacity={0.7}
-        >
+        <TouchableOpacity style={styles.navItem} activeOpacity={0.7}>
           <Ionicons name="camera" size={24} color="#4CAF50" />
           <Text style={[styles.navText, styles.navTextActive]}>Capture</Text>
         </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.navItem} 
+        <TouchableOpacity
+          style={styles.navItem}
           onPress={() => {
-            router.replace('/meal-history');
+            router.replace("/meal-history");
           }}
           activeOpacity={0.7}
         >
           <Ionicons name="bar-chart-outline" size={24} color="#757575" />
           <Text style={styles.navText}>History</Text>
         </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.navItem} 
+        <TouchableOpacity
+          style={styles.navItem}
           onPress={() => {
-            router.replace('/settings');
+            router.replace("/settings");
           }}
           activeOpacity={0.7}
         >
@@ -217,50 +350,50 @@ export default function CaptureScreen() {
 const styles = StyleSheet.create({
   simulatedCamera: {
     flex: 1,
-    backgroundColor: '#333',
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: '100%',
-    height: '100%',
+    backgroundColor: "#333",
+    justifyContent: "center",
+    alignItems: "center",
+    width: "100%",
+    height: "100%",
   },
   cameraInstructions: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   cameraInstructionsText: {
-    color: 'white',
+    color: "white",
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     marginTop: 10,
   },
   cameraInstructionsSubtext: {
-    color: 'rgba(255,255,255,0.7)',
+    color: "rgba(255,255,255,0.7)",
     fontSize: 14,
     marginTop: 5,
   },
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: "#000",
     paddingBottom: 60, // Add padding to account for the bottom navigation bar
   },
   bottomNav: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
+    flexDirection: "row",
+    backgroundColor: "#fff",
     paddingVertical: 8,
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-    position: 'absolute',
+    borderTopColor: "#e0e0e0",
+    position: "absolute",
     bottom: 34, // Adjusted from 0 to bring it higher up
     left: 10,
     right: 10,
     height: 56,
     elevation: 8,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
@@ -270,22 +403,22 @@ const styles = StyleSheet.create({
   },
   navItem: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   navText: {
     fontSize: 12,
     marginTop: 4,
-    color: '#757575',
+    color: "#757575",
   },
   navTextActive: {
-    color: '#4CAF50',
-    fontWeight: 'bold',
+    color: "#4CAF50",
+    fontWeight: "bold",
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     paddingHorizontal: 20,
     paddingVertical: 15,
   },
@@ -294,58 +427,58 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontWeight: "bold",
+    color: "#fff",
   },
   headerRight: {
     width: 34, // Same width as back button for alignment
   },
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     padding: 20,
   },
   loadingText: {
     marginTop: 20,
     fontSize: 16,
-    color: '#fff',
-    textAlign: 'center',
+    color: "#fff",
+    textAlign: "center",
   },
   permissionContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     padding: 20,
   },
   permissionText: {
     marginTop: 20,
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
+    fontWeight: "bold",
+    color: "#fff",
+    textAlign: "center",
   },
   permissionSubtext: {
     marginTop: 10,
     fontSize: 14,
-    color: '#bbb',
-    textAlign: 'center',
+    color: "#bbb",
+    textAlign: "center",
   },
   permissionButton: {
     marginTop: 30,
-    backgroundColor: '#4CAF50',
+    backgroundColor: "#4CAF50",
     paddingVertical: 12,
     paddingHorizontal: 30,
     borderRadius: 8,
   },
   permissionButtonText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   cameraContainer: {
     flex: 1,
-    overflow: 'hidden',
+    overflow: "hidden",
     borderRadius: 12,
     margin: 10,
   },
@@ -354,26 +487,26 @@ const styles = StyleSheet.create({
   },
   cameraPreview: {
     flex: 1,
-    resizeMode: 'cover',
+    resizeMode: "cover",
   },
   cameraOverlay: {
     flex: 1,
-    backgroundColor: 'transparent',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "transparent",
+    justifyContent: "center",
+    alignItems: "center",
   },
   focusFrame: {
     width: 250,
     height: 250,
     borderWidth: 2,
-    borderColor: '#4CAF50',
+    borderColor: "#4CAF50",
     borderRadius: 8,
     opacity: 0.7,
   },
   captureControls: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
     marginBottom: 30,
     paddingHorizontal: 30,
   },
@@ -384,30 +517,30 @@ const styles = StyleSheet.create({
     width: 70,
     height: 70,
     borderRadius: 35,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "rgba(255, 255, 255, 0.3)",
+    justifyContent: "center",
+    alignItems: "center",
   },
   captureButtonInner: {
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
   },
   flipButton: {
     padding: 15,
   },
   captureActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     paddingHorizontal: 20,
     marginBottom: 30,
   },
   actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#555',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#555",
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 8,
@@ -415,22 +548,38 @@ const styles = StyleSheet.create({
     marginHorizontal: 5,
   },
   analyzeButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: "#4CAF50",
     flex: 2,
   },
   actionButtonText: {
-    color: '#fff',
+    color: "#fff",
     marginLeft: 8,
-    fontWeight: '500',
+    fontWeight: "500",
   },
   instructions: {
     paddingHorizontal: 20,
     paddingVertical: 15,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
   },
   instructionsText: {
-    color: '#fff',
-    textAlign: 'center',
+    color: "#fff",
+    textAlign: "center",
     fontSize: 14,
+  },
+  foodLabelsContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+  },
+  foodLabelsTitle: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+    marginBottom: 10,
+  },
+  foodLabel: {
+    color: "#fff",
+    fontSize: 14,
+    marginBottom: 5,
   },
 });

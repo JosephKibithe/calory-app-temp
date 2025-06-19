@@ -1,315 +1,706 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Switch } from 'react-native';
-import { router } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useState, useMemo, useEffect } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  TextInput,
+  Switch,
+  Alert,
+  ActivityIndicator,
+} from "react-native";
+import { router, useLocalSearchParams } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { FoodItem } from "../lib/models";
+import { useAuth } from "../contexts/AuthContext";
+import { foodItemsApi } from "../lib/api";
+import { supabase } from "../lib/supabase";
 
-// Mock data for food analysis results
-const initialFoodItems = [
-  {
-    id: 1,
-    name: 'Grilled Chicken Breast',
-    quantity: '1 piece (120g)',
-    calories: 165,
-    protein: 31,
-    carbs: 0,
-    fat: 3.6,
-    verified: true,
-  },
-  {
-    id: 2,
-    name: 'Brown Rice',
-    quantity: '1 cup (195g)',
-    calories: 216,
-    protein: 5,
-    carbs: 45,
-    fat: 1.8,
-    verified: true,
-  },
-  {
-    id: 3,
-    name: 'Steamed Broccoli',
-    quantity: '1 cup (91g)',
-    calories: 55,
-    protein: 3.7,
-    carbs: 11.2,
-    fat: 0.6,
-    verified: true,
-  },
-];
+// Define the type for food item updates
+type FoodItemUpdate = Partial<
+  Omit<FoodItem, "id" | "created_by" | "created_at">
+>;
+
+// Mock nutrition database for demonstration purposes
+const mockNutritionDatabase: Record<
+  string,
+  { calories: number; protein: number; carbs: number; fat: number }
+> = {
+  apple: { calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+  banana: { calories: 105, protein: 1.3, carbs: 27, fat: 0.4 },
+  orange: { calories: 62, protein: 1.2, carbs: 15, fat: 0.2 },
+  chicken: { calories: 165, protein: 31, carbs: 0, fat: 3.6 },
+  rice: { calories: 130, protein: 2.7, carbs: 28, fat: 0.3 },
+  bread: { calories: 75, protein: 2.6, carbs: 13.8, fat: 1 },
+  pasta: { calories: 131, protein: 5, carbs: 25, fat: 1.1 },
+  beef: { calories: 250, protein: 26, carbs: 0, fat: 17 },
+  fish: { calories: 100, protein: 22, carbs: 0, fat: 1.3 },
+  milk: { calories: 60, protein: 3.2, carbs: 5, fat: 3.2 },
+  egg: { calories: 78, protein: 6, carbs: 0.6, fat: 5 },
+  cheese: { calories: 110, protein: 7, carbs: 0.4, fat: 9 },
+  yogurt: { calories: 80, protein: 5, carbs: 6, fat: 3 },
+  potato: { calories: 77, protein: 2, carbs: 17, fat: 0.1 },
+  tomato: { calories: 18, protein: 0.9, carbs: 3.9, fat: 0.2 },
+  carrot: { calories: 25, protein: 0.6, carbs: 6, fat: 0.1 },
+  lettuce: { calories: 5, protein: 0.5, carbs: 1, fat: 0.1 },
+  cucumber: { calories: 8, protein: 0.3, carbs: 1.9, fat: 0.1 },
+  broccoli: { calories: 31, protein: 2.6, carbs: 6, fat: 0.3 },
+  spinach: { calories: 7, protein: 0.9, carbs: 1.1, fat: 0.1 },
+};
 
 export default function AnalysisResults() {
-  const [foodItems, setFoodItems] = useState(initialFoodItems);
-  const [editingItem, setEditingItem] = useState<number | null>(null);
-  
-  // Calculate total nutrition values
-  const totalCalories = foodItems.reduce((sum, item) => sum + item.calories, 0);
-  const totalProtein = foodItems.reduce((sum, item) => sum + item.protein, 0);
-  const totalCarbs = foodItems.reduce((sum, item) => sum + item.carbs, 0);
-  const totalFat = foodItems.reduce((sum, item) => sum + item.fat, 0);
+  const params = useLocalSearchParams();
+  const { user } = useAuth();
 
-  const handleSaveItem = (id: number, updatedItem: any) => {
-    setFoodItems(foodItems.map(item => 
-      item.id === id ? { ...item, ...updatedItem } : item
-    ));
-    setEditingItem(null);
+  // Parse the labels from params
+  const [detectedLabels, setDetectedLabels] = useState<string[]>([]);
+  const [foodItems, setFoodItems] = useState<FoodItem[]>([]);
+  const [editingItem, setEditingItem] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Simulate AI nutrition analysis for a food item
+  const getAINutritionInfo = (
+    foodName: string
+  ): { calories: number; protein: number; carbs: number; fat: number } => {
+    // Convert to lowercase and check if it exists in our mock database
+    const normalizedName = foodName.toLowerCase();
+
+    // Look for exact matches or partial matches
+    let nutritionInfo = mockNutritionDatabase[normalizedName];
+
+    if (!nutritionInfo) {
+      // Try to find partial matches
+      const partialMatches = Object.keys(mockNutritionDatabase).filter(
+        (key) => normalizedName.includes(key) || key.includes(normalizedName)
+      );
+
+      if (partialMatches.length > 0) {
+        // Use the first partial match
+        nutritionInfo = mockNutritionDatabase[partialMatches[0]];
+      } else {
+        // Generate random realistic values for unknown items
+        nutritionInfo = {
+          calories: Math.floor(Math.random() * 300) + 50,
+          protein: Math.floor(Math.random() * 20) + 1,
+          carbs: Math.floor(Math.random() * 30) + 5,
+          fat: Math.floor(Math.random() * 15) + 1,
+        };
+      }
+    }
+
+    return nutritionInfo;
+  };
+
+  // Auto-populate nutritional information for all food items
+  const autoFillNutritionInfo = async () => {
+    setLoading(true);
+
+    try {
+      // Simulate API call delay
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      const updatedFoodItems = foodItems.map((item) => {
+        const nutritionInfo = getAINutritionInfo(item.name);
+
+        return {
+          ...item,
+          calories: nutritionInfo.calories,
+          protein: nutritionInfo.protein,
+          carbs: nutritionInfo.carbs,
+          fat: nutritionInfo.fat,
+          verified: false, // Set to false as this is AI-generated
+        };
+      });
+
+      setFoodItems(updatedFoodItems);
+      console.log("Updated food items after AI analysis:", updatedFoodItems);
+
+      if (updatedFoodItems.length === 0) {
+        throw new Error("No food items were generated");
+      }
+
+      Alert.alert(
+        "Success",
+        "Nutritional information auto-filled based on AI analysis. Please verify and adjust if needed."
+      );
+    } catch (err) {
+      console.error("Error auto-filling nutrition info:", err);
+      Alert.alert(
+        "Error",
+        "Failed to auto-fill nutritional information. You can still add items manually."
+      );
+
+      // If we have no food items, add a default one for manual entry
+      if (foodItems.length === 0) {
+        const defaultItems: FoodItem[] = [
+          {
+            id: 1,
+            name: "Food Item",
+            quantity: "1 serving",
+            calories: 0,
+            protein: 0,
+            carbs: 0,
+            fat: 0,
+            verified: false,
+            created_by: user?.id || "system",
+            created_at: new Date().toISOString(),
+            meal_type: "lunch",
+          },
+        ];
+        setFoodItems(defaultItems);
+        setDetectedLabels(["Manual Entry"]);
+        setTimeout(() => setEditingItem(1), 500);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load the detected labels from params
+  useEffect(() => {
+    console.log("Analysis results received params:", params);
+
+    if (!params.labels) {
+      console.error("No labels parameter provided");
+      Alert.alert(
+        "No Food Items Detected",
+        "We couldn't detect any food items in the image. Please try again with a clearer image or add items manually.",
+        [
+          {
+            text: "Add Manually",
+            onPress: () => {
+              // Create a default food item for manual entry
+              const defaultItems: FoodItem[] = [
+                {
+                  id: 1,
+                  name: "Food Item",
+                  quantity: "1 serving",
+                  calories: 0,
+                  protein: 0,
+                  carbs: 0,
+                  fat: 0,
+                  verified: false,
+                  created_by: user?.id || "system",
+                  created_at: new Date().toISOString(),
+                  meal_type: "lunch",
+                },
+              ];
+              setFoodItems(defaultItems);
+              setDetectedLabels(["Manual Entry"]);
+              setTimeout(() => setEditingItem(1), 500);
+            },
+          },
+          {
+            text: "Try Again",
+            onPress: () => router.back(),
+          },
+        ]
+      );
+      return;
+    }
+
+    try {
+      let labels: string[];
+
+      // Handle the labels parameter
+      if (typeof params.labels === "string") {
+        try {
+          labels = JSON.parse(params.labels);
+        } catch (parseErr) {
+          console.error("Error parsing labels JSON:", parseErr);
+          // If JSON parsing fails, try to use it as a comma-separated string
+          labels = params.labels.split(",").map((l) => l.trim());
+        }
+      } else if (Array.isArray(params.labels)) {
+        labels = params.labels;
+      } else {
+        throw new Error("Invalid labels format");
+      }
+
+      console.log("Parsed labels:", labels);
+
+      // Check if we have any valid labels
+      if (
+        !labels ||
+        labels.length === 0 ||
+        (labels.length === 1 && !labels[0])
+      ) {
+        throw new Error("Empty labels array");
+      }
+
+      setDetectedLabels(labels);
+
+      // Convert labels to food items
+      const newFoodItems: FoodItem[] = labels.map(
+        (label: string, index: number) => ({
+          id: index + 1, // Temporary ID
+          name: label,
+          quantity: "1 serving",
+          calories: 0, // To be filled by user or AI
+          protein: 0,
+          carbs: 0,
+          fat: 0,
+          verified: false,
+          created_by: user?.id || "system",
+          created_at: new Date().toISOString(),
+          meal_type: "lunch", // Default, can be changed
+        })
+      );
+
+      setFoodItems(newFoodItems);
+
+      // Automatically fill nutritional information after a short delay
+      setTimeout(() => autoFillNutritionInfo(), 500);
+    } catch (err) {
+      console.error("Error processing labels:", err);
+      Alert.alert(
+        "Detection Error",
+        "We had trouble processing the detected food items. Please try again or add items manually.",
+        [
+          {
+            text: "Add Manually",
+            onPress: () => {
+              // Create a default food item for manual entry
+              const defaultItems: FoodItem[] = [
+                {
+                  id: 1,
+                  name: "Food Item",
+                  quantity: "1 serving",
+                  calories: 0,
+                  protein: 0,
+                  carbs: 0,
+                  fat: 0,
+                  verified: false,
+                  created_by: user?.id || "system",
+                  created_at: new Date().toISOString(),
+                  meal_type: "lunch",
+                },
+              ];
+              setFoodItems(defaultItems);
+              setDetectedLabels(["Manual Entry"]);
+              setTimeout(() => setEditingItem(1), 500);
+            },
+          },
+          {
+            text: "Try Again",
+            onPress: () => router.back(),
+          },
+        ]
+      );
+    }
+  }, [params.labels, user]);
+
+  // Memoize total nutrition calculations
+  const { totalCalories, totalProtein, totalCarbs, totalFat } = useMemo(
+    () => ({
+      totalCalories: foodItems.reduce(
+        (sum, item) => sum + (item.calories || 0),
+        0
+      ),
+      totalProtein: foodItems.reduce(
+        (sum, item) => sum + (item.protein || 0),
+        0
+      ),
+      totalCarbs: foodItems.reduce((sum, item) => sum + (item.carbs || 0), 0),
+      totalFat: foodItems.reduce((sum, item) => sum + (item.fat || 0), 0),
+    }),
+    [foodItems]
+  );
+
+  const handleSaveItem = (id: number, updatedItem: FoodItemUpdate) => {
+    try {
+      // Validate the updated item
+      if (updatedItem.calories !== undefined && updatedItem.calories < 0) {
+        throw new Error("Calories cannot be negative");
+      }
+      if (updatedItem.protein !== undefined && updatedItem.protein < 0) {
+        throw new Error("Protein cannot be negative");
+      }
+      if (updatedItem.carbs !== undefined && updatedItem.carbs < 0) {
+        throw new Error("Carbs cannot be negative");
+      }
+      if (updatedItem.fat !== undefined && updatedItem.fat < 0) {
+        throw new Error("Fat cannot be negative");
+      }
+
+      setFoodItems(
+        foodItems.map((item) =>
+          item.id === id ? { ...item, ...updatedItem } : item
+        )
+      );
+      setEditingItem(null);
+    } catch (error: any) {
+      Alert.alert("Validation Error", error.message);
+    }
   };
 
   const handleRemoveItem = (id: number) => {
-    setFoodItems(foodItems.filter(item => item.id !== id));
-  };
-
-  const handleAddMeal = () => {
-    // In a real app, we would save this data to Supabase
-    console.log('Saving meal with items:', foodItems);
-    router.replace('/dashboard');
-  };
-
-  const renderFoodItem = (item: any) => {
-    if (editingItem === item.id) {
-      return (
-        <View key={item.id} style={styles.editItemCard}>
-          <Text style={styles.editTitle}>Edit Food Item</Text>
-          
-          <View style={styles.editField}>
-            <Text style={styles.editLabel}>Food Name:</Text>
-            <TextInput
-              style={styles.editInput}
-              value={item.name}
-              onChangeText={(text) => setFoodItems(foodItems.map(i => 
-                i.id === item.id ? { ...i, name: text } : i
-              ))}
-            />
-          </View>
-          
-          <View style={styles.editField}>
-            <Text style={styles.editLabel}>Quantity:</Text>
-            <TextInput
-              style={styles.editInput}
-              value={item.quantity}
-              onChangeText={(text) => setFoodItems(foodItems.map(i => 
-                i.id === item.id ? { ...i, quantity: text } : i
-              ))}
-            />
-          </View>
-          
-          <View style={styles.editField}>
-            <Text style={styles.editLabel}>Calories:</Text>
-            <TextInput
-              style={styles.editInput}
-              value={item.calories.toString()}
-              keyboardType="numeric"
-              onChangeText={(text) => setFoodItems(foodItems.map(i => 
-                i.id === item.id ? { ...i, calories: parseInt(text) || 0 } : i
-              ))}
-            />
-          </View>
-          
-          <View style={styles.macroEditRow}>
-            <View style={styles.macroEditField}>
-              <Text style={styles.editLabel}>Protein (g):</Text>
-              <TextInput
-                style={styles.editInput}
-                value={item.protein.toString()}
-                keyboardType="numeric"
-                onChangeText={(text) => setFoodItems(foodItems.map(i => 
-                  i.id === item.id ? { ...i, protein: parseFloat(text) || 0 } : i
-                ))}
-              />
-            </View>
-            
-            <View style={styles.macroEditField}>
-              <Text style={styles.editLabel}>Carbs (g):</Text>
-              <TextInput
-                style={styles.editInput}
-                value={item.carbs.toString()}
-                keyboardType="numeric"
-                onChangeText={(text) => setFoodItems(foodItems.map(i => 
-                  i.id === item.id ? { ...i, carbs: parseFloat(text) || 0 } : i
-                ))}
-              />
-            </View>
-            
-            <View style={styles.macroEditField}>
-              <Text style={styles.editLabel}>Fat (g):</Text>
-              <TextInput
-                style={styles.editInput}
-                value={item.fat.toString()}
-                keyboardType="numeric"
-                onChangeText={(text) => setFoodItems(foodItems.map(i => 
-                  i.id === item.id ? { ...i, fat: parseFloat(text) || 0 } : i
-                ))}
-              />
-            </View>
-          </View>
-          
-          <View style={styles.editActions}>
-            <TouchableOpacity 
-              style={[styles.editButton, styles.cancelButton]} 
-              onPress={() => setEditingItem(null)}
-            >
-              <Text style={styles.editButtonText}>Cancel</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.editButton, styles.saveButton]} 
-              onPress={() => handleSaveItem(item.id, item)}
-            >
-              <Text style={styles.editButtonText}>Save</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      );
-    }
-    
-    return (
-      <View key={item.id} style={styles.foodItemCard}>
-        <View style={styles.foodItemHeader}>
-          <View style={styles.foodItemNameContainer}>
-            <Text style={styles.foodItemName}>{item.name}</Text>
-            <Text style={styles.foodItemQuantity}>{item.quantity}</Text>
-          </View>
-          
-          <View style={styles.foodItemActions}>
-            <TouchableOpacity 
-              style={styles.actionIcon} 
-              onPress={() => setEditingItem(item.id)}
-            >
-              <Ionicons name="pencil-outline" size={18} color="#757575" />
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.actionIcon} 
-              onPress={() => handleRemoveItem(item.id)}
-            >
-              <Ionicons name="trash-outline" size={18} color="#F44336" />
-            </TouchableOpacity>
-          </View>
-        </View>
-        
-        <View style={styles.nutritionRow}>
-          <View style={styles.calorieBox}>
-            <Text style={styles.calorieValue}>{item.calories}</Text>
-            <Text style={styles.calorieLabel}>calories</Text>
-          </View>
-          
-          <View style={styles.macrosContainer}>
-            <View style={styles.macroItem}>
-              <Text style={styles.macroValue}>{item.protein}g</Text>
-              <Text style={styles.macroLabel}>Protein</Text>
-            </View>
-            
-            <View style={styles.macroItem}>
-              <Text style={styles.macroValue}>{item.carbs}g</Text>
-              <Text style={styles.macroLabel}>Carbs</Text>
-            </View>
-            
-            <View style={styles.macroItem}>
-              <Text style={styles.macroValue}>{item.fat}g</Text>
-              <Text style={styles.macroLabel}>Fat</Text>
-            </View>
-          </View>
-        </View>
-        
-        <View style={styles.verificationRow}>
-          <Ionicons 
-            name={item.verified ? "checkmark-circle" : "alert-circle-outline"} 
-            size={16} 
-            color={item.verified ? "#4CAF50" : "#FFC107"} 
-          />
-          <Text style={[styles.verificationText, { color: item.verified ? "#4CAF50" : "#FFC107" }]}>
-            {item.verified ? "AI verified" : "Needs verification"}
-          </Text>
-        </View>
-      </View>
+    Alert.alert(
+      "Confirm Removal",
+      "Are you sure you want to remove this item?",
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => {
+            setFoodItems(foodItems.filter((item) => item.id !== id));
+          },
+        },
+      ]
     );
+  };
+
+  const saveFoodItemsToSupabase = async () => {
+    setSaving(true);
+    setError(null);
+
+    try {
+      console.log(
+        "Starting to save food items to Supabase. Total items:",
+        foodItems.length
+      );
+
+      // Validate food items before saving
+      const validFoodItems = foodItems.filter((item) => item.calories > 0);
+
+      if (validFoodItems.length === 0) {
+        Alert.alert(
+          "No Valid Items",
+          "Please add calorie information to at least one food item before saving."
+        );
+        setSaving(false);
+        return;
+      }
+
+      // Format data for the API
+      const mealType = "lunch"; // This could be made selectable in future updates
+      const foodItemsToSave = validFoodItems.map((item) => ({
+        name: item.name,
+        quantity: item.quantity,
+        calories: item.calories,
+        protein: item.protein || 0,
+        carbs: item.carbs || 0,
+        fat: item.fat || 0,
+        verified: item.verified || false,
+      }));
+
+      // Call the new API method that handles the entire meal saving process
+      console.log(
+        "Calling saveMealWithFoodItems API with items:",
+        foodItemsToSave
+      );
+      const result = await foodItemsApi.saveMealWithFoodItems(
+        mealType,
+        foodItemsToSave
+      );
+
+      console.log("API result:", result);
+
+      if (result.success) {
+        Alert.alert("Success", `${result.message}`, [
+          {
+            text: "View Dashboard",
+            onPress: () => router.replace("/dashboard"),
+          },
+        ]);
+      } else {
+        Alert.alert("Error", `${result.message}`);
+      }
+    } catch (err: any) {
+      console.error("Error saving food items:", err);
+      setError(err.message || "Failed to save food items");
+      Alert.alert("Error", `Failed to save food items: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddMeal = async () => {
+    // Validate that at least one item has calories
+    const hasValidItems = foodItems.some((item) => item.calories > 0);
+
+    if (!hasValidItems) {
+      Alert.alert(
+        "Incomplete Information",
+        "Please add calorie information for at least one food item before saving the meal."
+      );
+      return;
+    }
+
+    // Save to Supabase
+    await saveFoodItemsToSupabase();
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar style="auto" />
-      
+      <StatusBar style="dark" />
+
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#000" />
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backButton}
+        >
+          <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Analysis Results</Text>
         <View style={styles.headerRight} />
       </View>
-      
-      <ScrollView style={styles.content}>
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryTitle}>Meal Summary</Text>
-          
-          <View style={styles.totalNutrition}>
-            <View style={styles.totalCalories}>
-              <Text style={styles.totalCaloriesValue}>{totalCalories}</Text>
-              <Text style={styles.totalCaloriesLabel}>Total Calories</Text>
+
+      <View style={styles.labelContainer}>
+        <Text style={styles.labelTitle}>Detected Food Items:</Text>
+        <View style={styles.labelList}>
+          {detectedLabels.map((label, index) => (
+            <View key={index} style={styles.labelBadge}>
+              <Text style={styles.labelText}>{label}</Text>
             </View>
-            
-            <View style={styles.totalMacros}>
-              <View style={styles.totalMacroItem}>
-                <Text style={styles.totalMacroValue}>{totalProtein.toFixed(1)}g</Text>
-                <Text style={styles.totalMacroLabel}>Protein</Text>
+          ))}
+        </View>
+      </View>
+
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#4CAF50" />
+          <Text style={styles.loadingText}>
+            Analyzing nutritional content...
+          </Text>
+        </View>
+      ) : (
+        <>
+          <ScrollView style={styles.foodList}>
+            <View style={styles.sectionHeader}>
+              <View>
+                <Text style={styles.sectionTitle}>Food Items</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Review and edit nutritional information
+                </Text>
               </View>
-              
-              <View style={styles.totalMacroItem}>
-                <Text style={styles.totalMacroValue}>{totalCarbs.toFixed(1)}g</Text>
-                <Text style={styles.totalMacroLabel}>Carbs</Text>
+              <TouchableOpacity
+                style={styles.refreshButton}
+                onPress={autoFillNutritionInfo}
+              >
+                <Ionicons name="refresh" size={18} color="#4CAF50" />
+                <Text style={styles.refreshText}>Refresh AI Analysis</Text>
+              </TouchableOpacity>
+            </View>
+
+            {foodItems.map((item) => (
+              <View key={item.id} style={styles.foodItem}>
+                <View style={styles.foodItemHeader}>
+                  <Text style={styles.foodName}>{item.name}</Text>
+                  <TouchableOpacity
+                    onPress={() => handleRemoveItem(item.id)}
+                    style={styles.removeButton}
+                  >
+                    <Ionicons name="close-circle" size={22} color="#ff6b6b" />
+                  </TouchableOpacity>
+                </View>
+
+                {editingItem === item.id ? (
+                  // Edit mode
+                  <View style={styles.editForm}>
+                    <View style={styles.formRow}>
+                      <Text style={styles.formLabel}>Quantity:</Text>
+                      <TextInput
+                        style={styles.formInput}
+                        value={item.quantity}
+                        onChangeText={(text) =>
+                          handleSaveItem(item.id, { quantity: text })
+                        }
+                        placeholder="e.g., 100g, 1 cup"
+                      />
+                    </View>
+
+                    <View style={styles.formRow}>
+                      <Text style={styles.formLabel}>Calories:</Text>
+                      <TextInput
+                        style={styles.formInput}
+                        value={item.calories ? item.calories.toString() : ""}
+                        onChangeText={(text) =>
+                          handleSaveItem(item.id, {
+                            calories: text ? parseInt(text) : 0,
+                          })
+                        }
+                        placeholder="0"
+                        keyboardType="numeric"
+                      />
+                    </View>
+
+                    <View style={styles.formRow}>
+                      <Text style={styles.formLabel}>Protein (g):</Text>
+                      <TextInput
+                        style={styles.formInput}
+                        value={item.protein ? item.protein.toString() : ""}
+                        onChangeText={(text) =>
+                          handleSaveItem(item.id, {
+                            protein: text ? parseFloat(text) : 0,
+                          })
+                        }
+                        placeholder="0"
+                        keyboardType="numeric"
+                      />
+                    </View>
+
+                    <View style={styles.formRow}>
+                      <Text style={styles.formLabel}>Carbs (g):</Text>
+                      <TextInput
+                        style={styles.formInput}
+                        value={item.carbs ? item.carbs.toString() : ""}
+                        onChangeText={(text) =>
+                          handleSaveItem(item.id, {
+                            carbs: text ? parseFloat(text) : 0,
+                          })
+                        }
+                        placeholder="0"
+                        keyboardType="numeric"
+                      />
+                    </View>
+
+                    <View style={styles.formRow}>
+                      <Text style={styles.formLabel}>Fat (g):</Text>
+                      <TextInput
+                        style={styles.formInput}
+                        value={item.fat ? item.fat.toString() : ""}
+                        onChangeText={(text) =>
+                          handleSaveItem(item.id, {
+                            fat: text ? parseFloat(text) : 0,
+                          })
+                        }
+                        placeholder="0"
+                        keyboardType="numeric"
+                      />
+                    </View>
+
+                    <View style={styles.formButtons}>
+                      <TouchableOpacity
+                        style={[styles.formButton, styles.cancelButton]}
+                        onPress={() => setEditingItem(null)}
+                      >
+                        <Text style={styles.formButtonText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.formButton, styles.saveButton]}
+                        onPress={() => setEditingItem(null)}
+                      >
+                        <Text style={styles.formButtonText}>Save</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  // Display mode
+                  <View style={styles.foodItemDetails}>
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Quantity:</Text>
+                      <Text style={styles.detailValue}>{item.quantity}</Text>
+                    </View>
+
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Calories:</Text>
+                      <Text style={styles.detailValue}>
+                        {item.calories} kcal
+                      </Text>
+                    </View>
+
+                    <View style={styles.nutritionRow}>
+                      <View style={styles.nutritionItem}>
+                        <Text style={styles.nutritionLabel}>Protein</Text>
+                        <Text style={styles.nutritionValue}>
+                          {item.protein}g
+                        </Text>
+                      </View>
+
+                      <View style={styles.nutritionItem}>
+                        <Text style={styles.nutritionLabel}>Carbs</Text>
+                        <Text style={styles.nutritionValue}>{item.carbs}g</Text>
+                      </View>
+
+                      <View style={styles.nutritionItem}>
+                        <Text style={styles.nutritionLabel}>Fat</Text>
+                        <Text style={styles.nutritionValue}>{item.fat}g</Text>
+                      </View>
+                    </View>
+
+                    {!item.verified && (
+                      <View style={styles.verificationBadge}>
+                        <Ionicons
+                          name="information-circle-outline"
+                          size={16}
+                          color="#ff9800"
+                        />
+                        <Text style={styles.verificationText}>
+                          AI estimated - please verify
+                        </Text>
+                      </View>
+                    )}
+
+                    <TouchableOpacity
+                      style={styles.editButton}
+                      onPress={() => setEditingItem(item.id)}
+                    >
+                      <Ionicons name="create-outline" size={16} color="#fff" />
+                      <Text style={styles.editButtonText}>Edit</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
-              
-              <View style={styles.totalMacroItem}>
-                <Text style={styles.totalMacroValue}>{totalFat.toFixed(1)}g</Text>
-                <Text style={styles.totalMacroLabel}>Fat</Text>
+            ))}
+          </ScrollView>
+
+          <View style={styles.totals}>
+            <Text style={styles.totalsTitle}>Meal Totals</Text>
+
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel}>Calories:</Text>
+              <Text style={styles.totalValue}>{totalCalories} kcal</Text>
+            </View>
+
+            <View style={styles.totalNutrition}>
+              <View style={styles.totalNutritionItem}>
+                <Text style={styles.totalNutritionLabel}>Protein</Text>
+                <Text style={styles.totalNutritionValue}>{totalProtein}g</Text>
+              </View>
+
+              <View style={styles.totalNutritionItem}>
+                <Text style={styles.totalNutritionLabel}>Carbs</Text>
+                <Text style={styles.totalNutritionValue}>{totalCarbs}g</Text>
+              </View>
+
+              <View style={styles.totalNutritionItem}>
+                <Text style={styles.totalNutritionLabel}>Fat</Text>
+                <Text style={styles.totalNutritionValue}>{totalFat}g</Text>
               </View>
             </View>
           </View>
-        </View>
-        
-        <View style={styles.foodItemsSection}>
-          <Text style={styles.sectionTitle}>Identified Food Items</Text>
-          <Text style={styles.sectionSubtitle}>
-            AI has identified {foodItems.length} items in your meal
-          </Text>
-          
-          {foodItems.map(renderFoodItem)}
-          
-          <TouchableOpacity style={styles.addItemButton}>
-            <Ionicons name="add-circle-outline" size={20} color="#4CAF50" />
-            <Text style={styles.addItemButtonText}>Add Another Food Item</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-      
-      <View style={styles.footer}>
-        <TouchableOpacity 
-          style={styles.saveMealButton}
-          onPress={handleAddMeal}
-        >
-          <Text style={styles.saveMealButtonText}>Save to Meal History</Text>
-        </TouchableOpacity>
-      </View>
 
-      {/* Bottom Navigation */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/dashboard')}>
-          <Ionicons name="home-outline" size={24} color="#757575" />
-          <Text style={styles.navText}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/capture')}>
-          <Ionicons name="camera-outline" size={24} color="#757575" />
-          <Text style={styles.navText}>Capture</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/meal-history')}>
-          <Ionicons name="bar-chart-outline" size={24} color="#757575" />
-          <Text style={styles.navText}>History</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/settings')}>
-          <Ionicons name="settings-outline" size={24} color="#757575" />
-          <Text style={styles.navText}>Settings</Text>
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity
+            style={[
+              styles.addMealButton,
+              saving && styles.addMealButtonDisabled,
+            ]}
+            onPress={handleAddMeal}
+            disabled={saving}
+          >
+            {saving ? (
+              <Text style={styles.addMealButtonText}>Saving...</Text>
+            ) : (
+              <>
+                <Ionicons name="add-circle-outline" size={20} color="#fff" />
+                <Text style={styles.addMealButtonText}>
+                  Save to Meal History
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </>
+      )}
     </SafeAreaView>
   );
 }
@@ -317,312 +708,308 @@ export default function AnalysisResults() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-    paddingBottom: 60, // Add padding to account for the bottom navigation bar
-  },
-  bottomNav: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-    position: 'absolute',
-    bottom: 34, // Adjusted from 0 to bring it higher up
-    left: 10,
-    right: 10,
-    height: 56,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    zIndex: 999,
-    borderRadius: 28,
-    marginBottom: 10,
-  },
-  navItem: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  navText: {
-    fontSize: 12,
-    marginTop: 4,
-    color: '#757575',
-  },
-  navTextActive: {
-    color: '#4CAF50',
-    fontWeight: 'bold',
+    backgroundColor: "#f7f7f7",
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: '#fff',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: "#fff",
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: "#e0e0e0",
   },
   backButton: {
-    padding: 5,
+    padding: 8,
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: "bold",
+    color: "#333",
   },
   headerRight: {
-    width: 34, // Same width as back button for alignment
+    width: 40,
   },
-  content: {
-    flex: 1,
+  labelContainer: {
+    backgroundColor: "#fff",
+    padding: 16,
+    marginBottom: 8,
   },
-  summaryCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    margin: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  summaryTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 15,
-  },
-  totalNutrition: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  totalCalories: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRightWidth: 1,
-    borderRightColor: '#e0e0e0',
-    paddingRight: 15,
-  },
-  totalCaloriesValue: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#4CAF50',
-  },
-  totalCaloriesLabel: {
-    fontSize: 14,
-    color: '#757575',
-  },
-  totalMacros: {
-    flex: 2,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingLeft: 15,
-  },
-  totalMacroItem: {
-    alignItems: 'center',
-  },
-  totalMacroValue: {
+  labelTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
+    marginBottom: 8,
+    color: "#333",
   },
-  totalMacroLabel: {
-    fontSize: 12,
-    color: '#757575',
+  labelList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
   },
-  foodItemsSection: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    margin: 16,
+  labelBadge: {
+    backgroundColor: "#e3f2fd",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  labelText: {
+    fontSize: 14,
+    color: "#2196f3",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
     padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-    marginBottom: 80, // Extra space for the footer
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: "#666",
+    textAlign: "center",
+  },
+  foodList: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 16,
+    marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 5,
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 4,
+    color: "#333",
   },
   sectionSubtitle: {
     fontSize: 14,
-    color: '#757575',
-    marginBottom: 20,
+    color: "#757575",
   },
-  foodItemCard: {
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
+  refreshButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#e8f5e9",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+  },
+  refreshText: {
+    fontSize: 12,
+    color: "#4CAF50",
+    marginLeft: 4,
+  },
+  foodItem: {
+    backgroundColor: "#fff",
     borderRadius: 8,
-    padding: 15,
-    marginBottom: 15,
+    marginBottom: 16,
+    padding: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   foodItemHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
   },
-  foodItemNameContainer: {
-    flex: 1,
+  foodName: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#333",
+    textTransform: "capitalize",
   },
-  foodItemName: {
-    fontSize: 16,
-    fontWeight: 'bold',
+  removeButton: {
+    padding: 4,
   },
-  foodItemQuantity: {
+  foodItemDetails: {
+    borderTopWidth: 1,
+    borderTopColor: "#f0f0f0",
+    paddingTop: 12,
+  },
+  detailRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  detailLabel: {
     fontSize: 14,
-    color: '#757575',
-    marginTop: 2,
+    color: "#757575",
   },
-  foodItemActions: {
-    flexDirection: 'row',
-  },
-  actionIcon: {
-    padding: 5,
-    marginLeft: 10,
+  detailValue: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#333",
   },
   nutritionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: "#f5f5f5",
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
   },
-  calorieBox: {
-    backgroundColor: '#E8F5E9',
-    borderRadius: 6,
-    padding: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 15,
-    width: 80,
+  nutritionItem: {
+    alignItems: "center",
   },
-  calorieValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#4CAF50',
-  },
-  calorieLabel: {
+  nutritionLabel: {
     fontSize: 12,
-    color: '#4CAF50',
+    color: "#757575",
+    marginBottom: 4,
   },
-  macrosContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  nutritionValue: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#333",
   },
-  macroItem: {
-    alignItems: 'center',
-  },
-  macroValue: {
-    fontSize: 15,
-    fontWeight: 'bold',
-  },
-  macroLabel: {
-    fontSize: 12,
-    color: '#757575',
-  },
-  verificationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  verificationBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: "#fff9c4",
+    borderRadius: 4,
+    alignSelf: "flex-start",
   },
   verificationText: {
     fontSize: 12,
-    marginLeft: 5,
-  },
-  editItemCard: {
-    backgroundColor: '#F5F5F5',
-    borderRadius: 8,
-    padding: 15,
-    marginBottom: 15,
-  },
-  editTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 15,
-  },
-  editField: {
-    marginBottom: 12,
-  },
-  editLabel: {
-    fontSize: 14,
-    color: '#757575',
-    marginBottom: 5,
-  },
-  editInput: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 6,
-    padding: 10,
-    fontSize: 14,
-  },
-  macroEditRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  macroEditField: {
-    flex: 1,
-    marginHorizontal: 3,
-  },
-  editActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginTop: 10,
+    color: "#ff9800",
+    marginLeft: 4,
   },
   editButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#4CAF50",
+    borderRadius: 4,
     paddingVertical: 8,
-    paddingHorizontal: 15,
-    borderRadius: 6,
-    marginLeft: 10,
-  },
-  cancelButton: {
-    backgroundColor: '#E0E0E0',
-  },
-  saveButton: {
-    backgroundColor: '#4CAF50',
+    paddingHorizontal: 12,
+    marginTop: 12,
   },
   editButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#fff",
+    marginLeft: 6,
   },
-  addItemButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
+  editForm: {
+    borderTopWidth: 1,
+    borderTopColor: "#f0f0f0",
+    paddingTop: 12,
+  },
+  formRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  formLabel: {
+    width: 100,
+    fontSize: 14,
+    color: "#757575",
+  },
+  formInput: {
+    flex: 1,
     borderWidth: 1,
-    borderColor: '#4CAF50',
-    borderRadius: 8,
-    borderStyle: 'dashed',
+    borderColor: "#e0e0e0",
+    borderRadius: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
   },
-  addItemButtonText: {
-    color: '#4CAF50',
-    fontWeight: '500',
+  formButtons: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 12,
+  },
+  formButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 4,
     marginLeft: 8,
   },
-  footer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+  cancelButton: {
+    backgroundColor: "#f5f5f5",
   },
-  saveMealButton: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 15,
-    borderRadius: 8,
-    alignItems: 'center',
+  saveButton: {
+    backgroundColor: "#4CAF50",
   },
-  saveMealButtonText: {
-    color: '#fff',
+  formButtonText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#fff",
+  },
+  totals: {
+    backgroundColor: "#fff",
+    padding: 16,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  totalsTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
+    marginBottom: 12,
+    color: "#333",
+  },
+  totalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  totalLabel: {
+    fontSize: 16,
+    color: "#757575",
+  },
+  totalValue: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#333",
+  },
+  totalNutrition: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: "#f5f5f5",
+    borderRadius: 8,
+    padding: 12,
+  },
+  totalNutritionItem: {
+    alignItems: "center",
+    flex: 1,
+  },
+  totalNutritionLabel: {
+    fontSize: 12,
+    color: "#757575",
+    marginBottom: 4,
+  },
+  totalNutritionValue: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#333",
+  },
+  addMealButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#4CAF50",
+    margin: 16,
+    paddingVertical: 14,
+    borderRadius: 8,
+  },
+  addMealButtonDisabled: {
+    backgroundColor: "#a5d6a7",
+  },
+  addMealButtonText: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#fff",
+    marginLeft: 8,
   },
 });

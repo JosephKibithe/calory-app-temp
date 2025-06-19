@@ -1,33 +1,56 @@
-import 'react-native-url-polyfill/auto';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createClient } from '@supabase/supabase-js';
+import "react-native-url-polyfill/auto";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { createClient } from "@supabase/supabase-js";
 
-// Read environment variables directly
-const SUPABASE_URL = 'https://ebqnxvvkcwxbyhrabiij.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVicW54dnZrY3d4YnlocmFiaWlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQxNDU5NDgsImV4cCI6MjA1OTcyMTk0OH0._WgVFbET7ynHr24WOdWj177VtOGJEghc4mioZvWSTIM';
+// Read environment variables with proper validation
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+
+// Validate Supabase configuration
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  throw new Error(
+    "Missing Supabase configuration. Please check your .env file and ensure SUPABASE_URL and SUPABASE_ANON_KEY are set."
+  );
+}
 
 // Create a single supabase client for interacting with your database
-export const supabase = createClient(
-  SUPABASE_URL,
-  SUPABASE_ANON_KEY,
-  {
-    auth: {
-      storage: AsyncStorage,
-      autoRefreshToken: true,
-      persistSession: true,
-      detectSessionInUrl: false,
-    },
-  }
-);
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    storage: AsyncStorage,
+    persistSession: true,
+    detectSessionInUrl: true,
+    autoRefreshToken: true,
+  },
+  global: {
+    headers: { "X-Supabase-Debug": "true" }, // Enable debugging headers
+  },
+});
 
 // Helper function to get the current user
 export const getCurrentUser = async () => {
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   return user;
 };
 
 // Helper function to get the current session
 export const getCurrentSession = async () => {
-  const { data: { session } } = await supabase.auth.getSession();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
   return session;
+};
+
+// Add error handling for Supabase operations
+export const handleSupabaseError = (error: any) => {
+  console.error("[SUPABASE] Error:", {
+    message: error.message,
+    details: error.details,
+    code: error.code,
+    hint: error.hint,
+  });
+
+  // Return a user-friendly error message
+  return error.message || "An unexpected error occurred";
 };

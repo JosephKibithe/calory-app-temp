@@ -1,6 +1,6 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import { UserProfile } from '../lib/models';
-import { userProfileApi } from '../lib/api';
+import { UserProfile, Meal } from '../lib/models';
+import { userProfileApi, mealsApi } from '../lib/api';
 import { useAuth } from './AuthContext';
 
 type UserContextType = {
@@ -9,6 +9,15 @@ type UserContextType = {
   error: string | null;
   updateProfile: (data: Partial<UserProfile>) => Promise<UserProfile | null>;
   refreshProfile: () => Promise<void>;
+  saveMeal: (mealData: {
+    meal_type: string;
+    consumed_at?: Date;
+    items: Array<{
+      food_item_id: number;
+      servings: number;
+    }>;
+  }) => Promise<Meal | null>;
+  getMealsByDate: (date: string) => Promise<Meal[]>;
 };
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -67,6 +76,47 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await fetchUserProfile();
   };
 
+  const saveMeal = async (mealData: {
+    meal_type: string;
+    consumed_at?: Date;
+    items: Array<{
+      food_item_id: number;
+      servings: number;
+    }>;
+  }) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const savedMeal = await mealsApi.saveMeal(mealData);
+      
+      if (!savedMeal) {
+        throw new Error('Failed to save meal');
+      }
+      
+      return savedMeal;
+    } catch (err: any) {
+      console.error('Error saving meal:', err);
+      setError(err.message || 'Failed to save meal');
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getMealsByDate = async (date: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      return await mealsApi.getMealsByDate(date);
+    } catch (err: any) {
+      console.error('Error fetching meals:', err);
+      setError(err.message || 'Failed to fetch meals');
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <UserContext.Provider
       value={{
@@ -75,6 +125,8 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         error,
         updateProfile,
         refreshProfile,
+        saveMeal,
+        getMealsByDate,
       }}
     >
       {children}
